@@ -30,7 +30,7 @@ func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 	cfg.fileServerHits.Store(0)
 }
 
-func myHandler(w http.ResponseWriter, r *http.Request) {
+func healthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(200)
 	w.Write([]byte("OK"))
@@ -40,9 +40,9 @@ func main() {
 	cfg := apiConfig{}
 	serverMux := http.NewServeMux()
 	serverMux.Handle("/app/", http.StripPrefix("/app/", cfg.middleWareMetrics(http.FileServer(http.Dir(".")))))
-	serverMux.HandleFunc("/healthz", myHandler)
-	serverMux.HandleFunc("/metrics", cfg.counter)
-	serverMux.HandleFunc("/reset", cfg.counter)
+	serverMux.HandleFunc("GET /healthz", healthCheck)
+	serverMux.HandleFunc("GET /metrics", cfg.counter)
+	serverMux.HandleFunc("POST /reset", cfg.reset)
 	server := http.Server{Handler: serverMux, Addr: ":8080"}
 	server.ListenAndServe()
 }
