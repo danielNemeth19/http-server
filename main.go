@@ -5,17 +5,44 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
+
+type JSONResponse struct {
+	CleanedBody string `json:"cleaned_body,omitempty"`
+}
+
+type JSONError struct {
+	Error       string `json:"error,omitempty"`
+}
 
 type Chirp struct {
 	Body string `json:"body"`
 }
 
-type JSONResponse struct {
-	Valid bool   `json:"valid,omitempty"`
-	Error string `json:"error,omitempty"`
+func (c *Chirp) cleanedWord(w string) string {
+	invalidWords := []string{"kerfuffle", "sharbert", "fornax"}
+	for _, invalidWord := range invalidWords {
+		sanitizedWord := strings.ToLower(w)
+		if invalidWord == sanitizedWord {
+			return "****"
+		}
+	}
+	return w
 }
+
+func (c *Chirp) cleanBody() string {
+	var cleanedWords []string
+	words := strings.Split(c.Body, " ")
+
+	for _, word := range words {
+		cleanedWord := c.cleanedWord(word)
+		cleanedWords = append(cleanedWords, cleanedWord)
+	}
+	return strings.Join(cleanedWords, " ")
+}
+
 
 type apiConfig struct {
 	fileServerHits atomic.Int32
@@ -47,33 +74,38 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func validateChirp(w http.ResponseWriter, r *http.Request) {
+func responsWithJSON(w http.ResponseWriter, code int, payload JSONResponse) {
 	w.Header().Set("Content-Type", "application/json")
+	response, _  := json.Marshal(payload)
+	w.WriteHeader(code)
+	w.Write(response)
+}
+
+func responsWithJSONError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	error := JSONError{Error: msg}
+	response, _  := json.Marshal(error)
+	w.WriteHeader(code)
+	w.Write(response)
+}
+
+func validateChirp(w http.ResponseWriter, r *http.Request) {
 	data := Chirp{}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&data)
 	if err != nil {
 		log.Printf("Error decoding: %s\n", err)
-		toResp := JSONResponse{Error: "Something went wrong"}
-		errMessage, _ := json.Marshal(toResp)
-		w.WriteHeader(500)
-		w.Write(errMessage)
+		responsWithJSONError(w, 500, "Something went wrong")
 		return
 	}
 	fmt.Printf("chirp: %s\n", data.Body)
 
 	if len(data.Body) > 140 {
-		toResp := JSONResponse{Error: "Chirp is too long"}
-		errMessage, _ := json.Marshal(toResp)
-		w.WriteHeader(400)
-		w.Write(errMessage)
+		responsWithJSONError(w, 400, "Chirp is too long")
 		return
 	}
-
-	resp := JSONResponse{Valid: true}
-	responseJson, _ := json.Marshal(resp)
-	w.WriteHeader(200)
-	w.Write(responseJson)
+	resp := JSONResponse{CleanedBody: data.cleanBody()}
+	responsWithJSON(w, 200, resp)
 }
 
 func main() {
