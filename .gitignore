@@ -18,3 +18,5 @@ package main
 
 #profiling
 profiling
+
+.env

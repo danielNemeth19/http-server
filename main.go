@@ -1,12 +1,21 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
+	"time"
+
+	"github.com/danielNemeth19/http-server/internal/database"
+
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 type JSONResponse struct {
@@ -14,7 +23,14 @@ type JSONResponse struct {
 }
 
 type JSONError struct {
-	Error       string `json:"error,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"createad_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
 }
 
 type Chirp struct {
@@ -43,9 +59,10 @@ func (c *Chirp) cleanBody() string {
 	return strings.Join(cleanedWords, " ")
 }
 
-
 type apiConfig struct {
 	fileServerHits atomic.Int32
+	db             *database.Queries
+	env            string
 }
 
 func (cfg *apiConfig) middleWareMetrics(next http.Handler) http.Handler {
@@ -63,9 +80,17 @@ func (cfg *apiConfig) counter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(200)
-	cfg.fileServerHits.Store(0)
+	if cfg.env != "dev" {
+		responsWithJSONError(w, 403, "Forbidden")
+	}
+	rowCount, err := cfg.db.DeleteUsers(r.Context())
+	if err != nil {
+		log.Printf("Error deleting users: %s\n", err)
+		responsWithJSONError(w, 500, "Something went wrong during db save")
+		return
+	}
+	log.Printf("Deleted %d number of users\n", rowCount)
+	responsWithJSON(w, 200, rowCount)
 }
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {
@@ -74,9 +99,9 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func responsWithJSON(w http.ResponseWriter, code int, payload JSONResponse) {
+func responsWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	response, _  := json.Marshal(payload)
+	response, _ := json.Marshal(payload)
 	w.WriteHeader(code)
 	w.Write(response)
 }
@@ -84,7 +109,7 @@ func responsWithJSON(w http.ResponseWriter, code int, payload JSONResponse) {
 func responsWithJSONError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	error := JSONError{Error: msg}
-	response, _  := json.Marshal(error)
+	response, _ := json.Marshal(error)
 	w.WriteHeader(code)
 	w.Write(response)
 }
@@ -108,12 +133,45 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 	responsWithJSON(w, 200, resp)
 }
 
+func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
+	data := struct{ email string }{}
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&data)
+	if err != nil {
+		log.Printf("Error decoding: %s\n", err)
+		responsWithJSONError(w, 500, "Email param could not be parsed")
+		return
+	}
+	email := sql.NullString{
+		String: data.email,
+		Valid:  true,
+	}
+	user, err := cfg.db.CreateUser(r.Context(), email)
+	if err != nil {
+		log.Printf("Error creating user: %s\n", err)
+		responsWithJSONError(w, 500, "Something went wrong during db save")
+		return
+	}
+
+	responsWithJSON(w, 201, user)
+}
+
 func main() {
-	cfg := apiConfig{}
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	env := os.Getenv("PLATFORM")
+	db, err := sql.Open("postgres", dbURL)
+	dbQueries := database.New(db)
+
+	if err != nil {
+		log.Printf("Error connecting: %s\n", err)
+	}
+	cfg := apiConfig{db: dbQueries, env: env}
 	serverMux := http.NewServeMux()
 	serverMux.Handle("/app/", http.StripPrefix("/app/", cfg.middleWareMetrics(http.FileServer(http.Dir(".")))))
 	serverMux.HandleFunc("GET /api/healthz", healthCheck)
 	serverMux.HandleFunc("POST /api/validate_chirp", validateChirp)
+	serverMux.HandleFunc("POST /api/users", cfg.createUser)
 	serverMux.HandleFunc("GET /admin/metrics", cfg.counter)
 	serverMux.HandleFunc("POST /admin/reset", cfg.reset)
 	server := http.Server{Handler: serverMux, Addr: ":8080"}
