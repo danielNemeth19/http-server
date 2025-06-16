@@ -11,6 +11,10 @@ goose-up:
 goose-down:
 	cd sql/schema && goose postgres "postgres://postgres:admin@localhost:5432/chirpy" down
 
+.PHONY: generate
+generate:
+	sqlc generate
+
 .PHONY: run-db
 run-db:
 	podman run -d --rm --name chirpy-db \

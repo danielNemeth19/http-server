@@ -18,26 +18,31 @@ import (
 	_ "github.com/lib/pq"
 )
 
-type JSONResponse struct {
-	CleanedBody string `json:"cleaned_body,omitempty"`
-}
-
 type JSONError struct {
 	Error string `json:"error,omitempty"`
 }
 
 type User struct {
 	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"createad_at"`
+	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
 }
 
-type Chirp struct {
-	Body string `json:"body"`
+type ChirpRequestParams struct {
+	Body   string        `json:"body"`
+	UserID uuid.NullUUID `json:"user_id"`
 }
 
-func (c *Chirp) cleanedWord(w string) string {
+type Chirp struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"body"`
+	UserID    uuid.UUID `json:"user_id"`
+}
+
+func (c *ChirpRequestParams) cleanedWord(w string) string {
 	invalidWords := []string{"kerfuffle", "sharbert", "fornax"}
 	for _, invalidWord := range invalidWords {
 		sanitizedWord := strings.ToLower(w)
@@ -48,7 +53,7 @@ func (c *Chirp) cleanedWord(w string) string {
 	return w
 }
 
-func (c *Chirp) cleanBody() string {
+func (c *ChirpRequestParams) cleanBody() string {
 	var cleanedWords []string
 	words := strings.Split(c.Body, " ")
 
@@ -114,8 +119,8 @@ func responsWithJSONError(w http.ResponseWriter, code int, msg string) {
 	w.Write(response)
 }
 
-func validateChirp(w http.ResponseWriter, r *http.Request) {
-	data := Chirp{}
+func (cfg *apiConfig) addChirp(w http.ResponseWriter, r *http.Request) {
+	data := ChirpRequestParams{}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&data)
 	if err != nil {
@@ -123,18 +128,36 @@ func validateChirp(w http.ResponseWriter, r *http.Request) {
 		responsWithJSONError(w, 500, "Something went wrong")
 		return
 	}
-	fmt.Printf("chirp: %s\n", data.Body)
+	log.Printf("chirp: %s\n", data.Body)
 
 	if len(data.Body) > 140 {
 		responsWithJSONError(w, 400, "Chirp is too long")
 		return
 	}
-	resp := JSONResponse{CleanedBody: data.cleanBody()}
-	responsWithJSON(w, 200, resp)
+	chirpParams := database.CreateChirpParams{
+		Body:   data.cleanBody(),
+		UserID: data.UserID,
+	}
+	chirp, err := cfg.db.CreateChirp(r.Context(), chirpParams)
+	if err != nil {
+		log.Printf("Error decoding: %s\n", err)
+		responsWithJSONError(w, 500, "Database saved failed")
+		return
+	}
+	chirpCreated := Chirp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID.UUID,
+	}
+	responsWithJSON(w, 201, chirpCreated)
 }
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
-	data := struct{ email string }{}
+	data := struct {
+		Email string `json:"email"`
+	}{}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&data)
 	if err != nil {
@@ -143,7 +166,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := sql.NullString{
-		String: data.email,
+		String: data.Email,
 		Valid:  true,
 	}
 	user, err := cfg.db.CreateUser(r.Context(), email)
@@ -153,7 +176,13 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	responsWithJSON(w, 201, user)
+	userResponse := User{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email.String,
+	}
+	responsWithJSON(w, 201, userResponse)
 }
 
 func main() {
@@ -170,7 +199,7 @@ func main() {
 	serverMux := http.NewServeMux()
 	serverMux.Handle("/app/", http.StripPrefix("/app/", cfg.middleWareMetrics(http.FileServer(http.Dir(".")))))
 	serverMux.HandleFunc("GET /api/healthz", healthCheck)
-	serverMux.HandleFunc("POST /api/validate_chirp", validateChirp)
+	serverMux.HandleFunc("POST /api/chirps", cfg.addChirp)
 	serverMux.HandleFunc("POST /api/users", cfg.createUser)
 	serverMux.HandleFunc("GET /admin/metrics", cfg.counter)
 	serverMux.HandleFunc("POST /admin/reset", cfg.reset)
