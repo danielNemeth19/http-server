@@ -154,6 +154,28 @@ func (cfg *apiConfig) addChirp(w http.ResponseWriter, r *http.Request) {
 	responsWithJSON(w, 201, chirpCreated)
 }
 
+func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
+	chirpsDB, err := cfg.db.GetChirps(r.Context())
+	if err != nil {
+		log.Printf("Error running database query: %s\n", err)
+		responsWithJSONError(w, 500, "Something went wrong")
+		return
+	}
+	var chirps []Chirp
+	for _, msg := range chirpsDB {
+		chirp := Chirp{
+			ID: msg.ID,
+			CreatedAt: msg.CreatedAt,
+			UpdatedAt: msg.UpdatedAt,
+			Body: msg.Body,
+			UserID: msg.UserID.UUID,
+		}
+		chirps = append(chirps, chirp)
+
+	}
+	responsWithJSON(w, 200, chirps)
+}
+
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		Email string `json:"email"`
@@ -200,6 +222,8 @@ func main() {
 	serverMux.Handle("/app/", http.StripPrefix("/app/", cfg.middleWareMetrics(http.FileServer(http.Dir(".")))))
 	serverMux.HandleFunc("GET /api/healthz", healthCheck)
 	serverMux.HandleFunc("POST /api/chirps", cfg.addChirp)
+	serverMux.HandleFunc("GET /api/chirps", cfg.getChirps)
+	serverMux.HandleFunc("GET /api/chirps/{chirpID}", cfg.getChirp)
 	serverMux.HandleFunc("POST /api/users", cfg.createUser)
 	serverMux.HandleFunc("GET /admin/metrics", cfg.counter)
 	serverMux.HandleFunc("POST /admin/reset", cfg.reset)
