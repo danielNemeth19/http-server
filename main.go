@@ -176,6 +176,36 @@ func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
 	responsWithJSON(w, 200, chirps)
 }
 
+
+func (cfg *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
+	param := r.PathValue("chirpID")
+	uuidParam, err := uuid.Parse(param)
+	if err != nil {
+		log.Printf("Error parsing incoming param as UUID: %s\n", err)
+		responsWithJSONError(w, 400, "Bad value for UUID")
+		return
+	}
+	msg, err := cfg.db.GetChirp(r.Context(), uuidParam)
+	if err == sql.ErrNoRows {
+		log.Printf("Not found error: %s\n", err)
+		responsWithJSONError(w, 404, "No record has been found")
+		return
+	} else if err != nil {
+		log.Printf("Error running database query: %s\n", err)
+		responsWithJSONError(w, 500, "Something went wrong")
+		return
+	}
+	chirp := Chirp{
+		ID: msg.ID,
+		CreatedAt: msg.CreatedAt,
+		UpdatedAt: msg.UpdatedAt,
+		Body: msg.Body,
+		UserID: msg.UserID.UUID,
+	}
+	responsWithJSON(w, 200, chirp)
+}
+
+
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	data := struct {
 		Email string `json:"email"`
