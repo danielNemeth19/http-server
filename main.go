@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/danielNemeth19/http-server/internal/auth"
 	"github.com/danielNemeth19/http-server/internal/database"
 
 	"github.com/joho/godotenv"
@@ -20,6 +22,11 @@ import (
 
 type JSONError struct {
 	Error string `json:"error,omitempty"`
+}
+
+type UserRequestParams struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 type User struct {
@@ -164,18 +171,17 @@ func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
 	var chirps []Chirp
 	for _, msg := range chirpsDB {
 		chirp := Chirp{
-			ID: msg.ID,
+			ID:        msg.ID,
 			CreatedAt: msg.CreatedAt,
 			UpdatedAt: msg.UpdatedAt,
-			Body: msg.Body,
-			UserID: msg.UserID.UUID,
+			Body:      msg.Body,
+			UserID:    msg.UserID.UUID,
 		}
 		chirps = append(chirps, chirp)
 
 	}
 	responsWithJSON(w, 200, chirps)
 }
-
 
 func (cfg *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
 	param := r.PathValue("chirpID")
@@ -196,45 +202,78 @@ func (cfg *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chirp := Chirp{
-		ID: msg.ID,
+		ID:        msg.ID,
 		CreatedAt: msg.CreatedAt,
 		UpdatedAt: msg.UpdatedAt,
-		Body: msg.Body,
-		UserID: msg.UserID.UUID,
+		Body:      msg.Body,
+		UserID:    msg.UserID.UUID,
 	}
 	responsWithJSON(w, 200, chirp)
 }
 
-
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
-	data := struct {
-		Email string `json:"email"`
-	}{}
+	data := UserRequestParams{}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&data)
 	if err != nil {
 		log.Printf("Error decoding: %s\n", err)
-		responsWithJSONError(w, 500, "Email param could not be parsed")
+		responsWithJSONError(w, 500, "Params could not be parsed")
 		return
 	}
-	email := sql.NullString{
-		String: data.Email,
-		Valid:  true,
+	hashedPassword, err := auth.HashPassword(data.Password)
+	if err != nil {
+		log.Printf("Error hashing password: %s\n", err)
+		responsWithJSONError(w, 500, "Error hashing password")
 	}
-	user, err := cfg.db.CreateUser(r.Context(), email)
+	params := database.CreateUserParams{
+		Email:          sql.NullString{String: data.Email, Valid: true},
+		HashedPassword: sql.NullString{String: hashedPassword, Valid: true},
+	}
+	user, err := cfg.db.CreateUser(r.Context(), params)
 	if err != nil {
 		log.Printf("Error creating user: %s\n", err)
 		responsWithJSONError(w, 500, "Something went wrong during db save")
 		return
 	}
-
 	userResponse := User{
 		ID:        user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email.String,
 	}
+	log.Printf("User created: %s\n", userResponse.Email)
 	responsWithJSON(w, 201, userResponse)
+}
+
+func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
+	data := UserRequestParams{}
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&data)
+	if err != nil {
+		log.Printf("Error decoding: %s\n", err)
+		responsWithJSONError(w, 500, "Params could not be parsed")
+		return
+	}
+	user, err := cfg.db.GetUser(r.Context(), sql.NullString{String: data.Email, Valid: true})
+	if err != nil {
+		log.Printf("User lookup failed in database: %s\n", err)
+		responsWithJSONError(w, 401, "Unauthorized")
+		return
+	}
+	err = auth.CheckPasswordHash(user.HashedPassword.String, data.Password)
+	if err != nil {
+		log.Printf("Password check failed: %s\n", err)
+		responsWithJSONError(w, 401, "Unauthorized")
+		return
+	}
+	userResponse := User{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email.String,
+	}
+	log.Printf("Login successfull for user %s\n", userResponse.Email)
+	responsWithJSON(w, 200, userResponse)
 }
 
 func main() {
@@ -255,6 +294,7 @@ func main() {
 	serverMux.HandleFunc("GET /api/chirps", cfg.getChirps)
 	serverMux.HandleFunc("GET /api/chirps/{chirpID}", cfg.getChirp)
 	serverMux.HandleFunc("POST /api/users", cfg.createUser)
+	serverMux.HandleFunc("POST /api/login", cfg.login)
 	serverMux.HandleFunc("GET /admin/metrics", cfg.counter)
 	serverMux.HandleFunc("POST /admin/reset", cfg.reset)
 	server := http.Server{Handler: serverMux, Addr: ":8080"}
