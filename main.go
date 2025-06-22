@@ -273,6 +273,10 @@ func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
 		Email:     user.Email.String,
 	}
 	log.Printf("Login successfull for user %s\n", userResponse.Email)
+
+	jwt, _ := auth.MakeJWT(userResponse.ID, "mySecret", 180)
+	log.Printf("JWT is: %s\n", jwt)
+
 	responsWithJSON(w, 200, userResponse)
 }
 
