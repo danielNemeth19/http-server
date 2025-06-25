@@ -94,6 +94,7 @@ func (cfg *apiConfig) counter(w http.ResponseWriter, r *http.Request) {
 func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 	if cfg.env != "dev" {
 		responsWithJSONError(w, 403, "Forbidden")
+		return
 	}
 	rowCount, err := cfg.db.DeleteUsers(r.Context())
 	if err != nil {
@@ -256,7 +257,7 @@ func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := cfg.db.GetUser(r.Context(), sql.NullString{String: data.Email, Valid: true})
 	if err != nil {
-		log.Printf("User lookup failed in database: %s\n", err)
+		log.Printf("User %s lookup failed in database: %s\n", user.Email.String, err)
 		responsWithJSONError(w, 401, "Unauthorized")
 		return
 	}

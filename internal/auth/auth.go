@@ -30,13 +30,21 @@ func MakeJWT(userId uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiresIn)),
 		Subject: userId.String(),
 	}
-	jwt := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
-	s, err := jwt.SignedString(tokenSecret)
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	s, err := token.SignedString([]byte(tokenSecret))
 	if err != nil {
 		fmt.Printf("error  is: %s\n", err)
 		return "", err
 	}
 	fmt.Printf("from jwt: %s\n", s)
 	return s, nil
+}
 
+func _dummy(tokenSecret string) (interface{}, error) {
+	return tokenSecret, nil
+}
+
+func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
+	emptyClaim := &jwt.RegisteredClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, *emptyClaim, _dummy)
 }
