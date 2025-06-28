@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
@@ -42,5 +43,35 @@ func TestValidateJWTFailsIncorrectSecret(t *testing.T) {
 	_, err := ValidateJWT(s, "thisWasNotTheOne")
 	if err == nil {
 		t.Errorf("Error should have been raised as token secret incorrect: %s\n", err)
+	}
+}
+
+func TestGetBearerTokenFailsIncorrectHeader(t *testing.T) {
+	header := http.Header{
+		"Irrelevant": []string{"barmi"},
+	}
+	_, err := GetBearerToken(header)
+	if err == nil {
+		t.Errorf("Error should have been raised as Authorization header missing: %s\n", err)
+	}
+}
+
+func TestGetBearerTokenInvalidBearerToken(t *testing.T) {
+	header := http.Header{
+		"Authorization": []string{"invalid"},
+	}
+	_, err := GetBearerToken(header)
+	if err == nil {
+		t.Errorf("Error should have been raised as string not a bearer token: %s\n", err)
+	}
+}
+
+func TestGetBearerToken(t *testing.T) {
+	header := http.Header{
+		"Authorization": []string{"Bearer testToken"},
+	}
+	token, _ := GetBearerToken(header)
+	if token != "testToken" {
+		t.Errorf("Token should have been parsed, got: %s\n", token)
 	}
 }

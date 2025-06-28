@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"time"
+	"net/http"
+	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -33,10 +35,8 @@ func MakeJWT(userId uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	s, err := token.SignedString([]byte(tokenSecret))
 	if err != nil {
-		fmt.Printf("error  is: %s\n", err)
 		return "", err
 	}
-	fmt.Printf("from jwt: %s\n", s)
 	return s, nil
 }
 
@@ -49,7 +49,6 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		log.Printf("Problem: %s\n", err)
 		return uuid.Nil, err
 	} else if claims, ok := token.Claims.(*jwt.RegisteredClaims); ok {
-		fmt.Println(claims.Issuer)
 		id, err := uuid.Parse(claims.Subject)
 		if err != nil {
 			log.Printf("Problem: %s\n", err)
@@ -60,4 +59,16 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		log.Println("problem with claim")
 		return uuid.Nil, err
 	}
+}
+
+func GetBearerToken(headers http.Header) (string, error) {
+	authHeader := headers.Get("Authorization")
+	if authHeader == "" {
+		return "", fmt.Errorf("No auth header found")
+	}
+	token, isBearer := strings.CutPrefix(authHeader, "Bearer ")
+	if !isBearer {
+		return "", fmt.Errorf("No auth header found")
+	}
+	return token, nil
 }
