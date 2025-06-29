@@ -24,7 +24,7 @@ type JSONError struct {
 	Error string `json:"error,omitempty"`
 }
 
-type UserRequestParams struct {
+type CreateUserParams struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
@@ -36,9 +36,23 @@ type User struct {
 	Email     string    `json:"email"`
 }
 
+type UserLoginParams struct {
+	Email            string `json:"email"`
+	Password         string `json:"password"`
+	ExpiresInSeconds int64  `json:"expires_in_seconds,omitempty"`
+	Expiry           time.Duration
+}
+
+type UserLogin struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
+	Token     string    `json:"token"`
+}
+
 type ChirpRequestParams struct {
 	Body   string        `json:"body"`
-	UserID uuid.NullUUID `json:"user_id"`
 }
 
 type Chirp struct {
@@ -47,6 +61,15 @@ type Chirp struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	Body      string    `json:"body"`
 	UserID    uuid.UUID `json:"user_id"`
+}
+
+func (u *UserLoginParams) cleanExpiresIn() {
+	expiry := time.Duration(u.ExpiresInSeconds) * time.Second
+	if expiry == 0 || expiry > time.Hour {
+		u.Expiry = time.Hour
+	} else {
+		u.Expiry = expiry
+	}
 }
 
 func (c *ChirpRequestParams) cleanedWord(w string) string {
@@ -75,6 +98,7 @@ type apiConfig struct {
 	fileServerHits atomic.Int32
 	db             *database.Queries
 	env            string
+	jwtSecret      string
 }
 
 func (cfg *apiConfig) middleWareMetrics(next http.Handler) http.Handler {
@@ -128,9 +152,21 @@ func responsWithJSONError(w http.ResponseWriter, code int, msg string) {
 }
 
 func (cfg *apiConfig) addChirp(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Printf("Authorization header is missing")
+		responsWithJSONError(w, 401, "Valid JWT token is needed")
+		return
+	}
+	uuId, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		log.Printf("Token is invalid")
+		responsWithJSONError(w, 401, "Valid JWT token is needed")
+		return
+	}
 	data := ChirpRequestParams{}
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&data)
+	err = decoder.Decode(&data)
 	if err != nil {
 		log.Printf("Error decoding: %s\n", err)
 		responsWithJSONError(w, 500, "Something went wrong")
@@ -144,7 +180,7 @@ func (cfg *apiConfig) addChirp(w http.ResponseWriter, r *http.Request) {
 	}
 	chirpParams := database.CreateChirpParams{
 		Body:   data.cleanBody(),
-		UserID: data.UserID,
+		UserID: uuid.NullUUID{Valid: true, UUID: uuId},
 	}
 	chirp, err := cfg.db.CreateChirp(r.Context(), chirpParams)
 	if err != nil {
@@ -213,7 +249,7 @@ func (cfg *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
-	data := UserRequestParams{}
+	data := CreateUserParams{}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&data)
 	if err != nil {
@@ -247,7 +283,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
-	data := UserRequestParams{}
+	data := UserLoginParams{}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&data)
 	if err != nil {
@@ -255,6 +291,7 @@ func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
 		responsWithJSONError(w, 500, "Params could not be parsed")
 		return
 	}
+	data.cleanExpiresIn()
 	user, err := cfg.db.GetUser(r.Context(), sql.NullString{String: data.Email, Valid: true})
 	if err != nil {
 		log.Printf("User %s lookup failed in database: %s\n", user.Email.String, err)
@@ -267,17 +304,18 @@ func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
 		responsWithJSONError(w, 401, "Unauthorized")
 		return
 	}
-	userResponse := User{
+
+	jwt, _ := auth.MakeJWT(user.ID, cfg.jwtSecret, data.Expiry)
+	log.Printf("Login successfull for user %s - expires in %d seconds\n", data.Email, (data.Expiry / time.Second))
+	log.Printf("JWT is: %s\n", jwt)
+
+	userResponse := UserLogin{
 		ID:        user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email.String,
+		Token:     jwt,
 	}
-	log.Printf("Login successfull for user %s\n", userResponse.Email)
-
-	jwt, _ := auth.MakeJWT(userResponse.ID, "mySecret", 180)
-	log.Printf("JWT is: %s\n", jwt)
-
 	responsWithJSON(w, 200, userResponse)
 }
 
@@ -285,13 +323,14 @@ func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
 	env := os.Getenv("PLATFORM")
+	secret := os.Getenv("SECRET")
 	db, err := sql.Open("postgres", dbURL)
 	dbQueries := database.New(db)
 
 	if err != nil {
 		log.Printf("Error connecting: %s\n", err)
 	}
-	cfg := apiConfig{db: dbQueries, env: env}
+	cfg := apiConfig{db: dbQueries, env: env, jwtSecret: secret}
 	serverMux := http.NewServeMux()
 	serverMux.Handle("/app/", http.StripPrefix("/app/", cfg.middleWareMetrics(http.FileServer(http.Dir(".")))))
 	serverMux.HandleFunc("GET /api/healthz", healthCheck)
