@@ -1,11 +1,13 @@
 package auth
 
 import (
+	"encoding/hex"
+	"crypto/rand"
 	"fmt"
 	"log"
-	"time"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -71,4 +73,15 @@ func GetBearerToken(headers http.Header) (string, error) {
 		return "", fmt.Errorf("No auth header found")
 	}
 	return token, nil
+}
+
+func MakreRefreshToken() (string, error) {
+	randString := make([]byte, 32)
+	_, err := rand.Read(randString)
+	if err != nil {
+		return "", fmt.Errorf("Error generating random data: %s\n", err)
+	}
+	endodedStr := hex.EncodeToString(randString)
+	return endodedStr, nil
+
 }

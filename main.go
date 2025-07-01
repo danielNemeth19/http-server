@@ -39,8 +39,6 @@ type User struct {
 type UserLoginParams struct {
 	Email            string `json:"email"`
 	Password         string `json:"password"`
-	ExpiresInSeconds int64  `json:"expires_in_seconds,omitempty"`
-	Expiry           time.Duration
 }
 
 type UserLogin struct {
@@ -61,15 +59,6 @@ type Chirp struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	Body      string    `json:"body"`
 	UserID    uuid.UUID `json:"user_id"`
-}
-
-func (u *UserLoginParams) cleanExpiresIn() {
-	expiry := time.Duration(u.ExpiresInSeconds) * time.Second
-	if expiry == 0 || expiry > time.Hour {
-		u.Expiry = time.Hour
-	} else {
-		u.Expiry = expiry
-	}
 }
 
 func (c *ChirpRequestParams) cleanedWord(w string) string {
@@ -291,7 +280,6 @@ func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
 		responsWithJSONError(w, 500, "Params could not be parsed")
 		return
 	}
-	data.cleanExpiresIn()
 	user, err := cfg.db.GetUser(r.Context(), sql.NullString{String: data.Email, Valid: true})
 	if err != nil {
 		log.Printf("User %s lookup failed in database: %s\n", user.Email.String, err)
@@ -305,8 +293,8 @@ func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jwt, _ := auth.MakeJWT(user.ID, cfg.jwtSecret, data.Expiry)
-	log.Printf("Login successfull for user %s - expires in %d seconds\n", data.Email, (data.Expiry / time.Second))
+	jwt, _ := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Hour)
+	log.Printf("Login successfull for user %s\n", data.Email)
 	log.Printf("JWT is: %s\n", jwt)
 
 	userResponse := UserLogin{
