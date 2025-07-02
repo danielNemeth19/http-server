@@ -37,20 +37,21 @@ type User struct {
 }
 
 type UserLoginParams struct {
-	Email            string `json:"email"`
-	Password         string `json:"password"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 type UserLogin struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
-	Token     string    `json:"token"`
+	ID           uuid.UUID `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Email        string    `json:"email"`
+	Token        string    `json:"token"`
+	RefreshToken string    `json:"refresh_token"`
 }
 
 type ChirpRequestParams struct {
-	Body   string        `json:"body"`
+	Body string `json:"body"`
 }
 
 type Chirp struct {
@@ -297,12 +298,31 @@ func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Login successfull for user %s\n", data.Email)
 	log.Printf("JWT is: %s\n", jwt)
 
+	refreshToken, err := auth.MakreRefreshToken()
+	if err != nil {
+		log.Printf("Refresh token generation failed%s\n", err)
+		responsWithJSONError(w, 500, "Refresh token failed to generate")
+		return
+	}
+
+	refreshTokenParams := database.CreateRefreshTokenParams{
+		Token:     refreshToken,
+		UserID:    uuid.NullUUID{UUID: user.ID, Valid: true},
+		ExpiresAt: time.Now().Add(time.Hour * 24 * 60),
+	}
+	refreshTokenRecord, err := cfg.db.CreateRefreshToken(r.Context(), refreshTokenParams)
+	if err != nil {
+		log.Printf("Saving refresh token to database failed: %s\n", err)
+		responsWithJSONError(w, 500, "Refresh token failed to generate")
+		return
+	}
 	userResponse := UserLogin{
-		ID:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email.String,
-		Token:     jwt,
+		ID:           user.ID,
+		CreatedAt:    user.CreatedAt,
+		UpdatedAt:    user.UpdatedAt,
+		Email:        user.Email.String,
+		Token:        jwt,
+		RefreshToken: refreshTokenRecord.Token,
 	}
 	responsWithJSON(w, 200, userResponse)
 }
