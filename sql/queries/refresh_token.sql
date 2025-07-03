@@ -5,7 +5,17 @@ VALUES (
 	NOW(),
 	NOW(),
 	$2,
-	$3,
+	NOW() + INTERVAL '60 days',
 	NULL
 )
 RETURNING *;
+
+-- name: GetRefreshTokenEntry :one
+SELECT * from refresh_tokens
+WHERE token = $1;
+
+-- name: RevokeRefreshToken :execrows
+UPDATE refresh_tokens
+SET updated_at=NOW(),
+	revoked_at=NOW()
+WHERE token=$1;

@@ -62,6 +62,10 @@ type Chirp struct {
 	UserID    uuid.UUID `json:"user_id"`
 }
 
+type TokenResponse struct {
+	Token string `json:"token"`
+}
+
 func (c *ChirpRequestParams) cleanedWord(w string) string {
 	invalidWords := []string{"kerfuffle", "sharbert", "fornax"}
 	for _, invalidWord := range invalidWords {
@@ -298,7 +302,7 @@ func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Login successfull for user %s\n", data.Email)
 	log.Printf("JWT is: %s\n", jwt)
 
-	refreshToken, err := auth.MakreRefreshToken()
+	refreshToken, err := auth.MakereRefreshToken()
 	if err != nil {
 		log.Printf("Refresh token generation failed%s\n", err)
 		responsWithJSONError(w, 500, "Refresh token failed to generate")
@@ -306,11 +310,11 @@ func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	refreshTokenParams := database.CreateRefreshTokenParams{
-		Token:     refreshToken,
-		UserID:    uuid.NullUUID{UUID: user.ID, Valid: true},
-		ExpiresAt: time.Now().Add(time.Hour * 24 * 60),
+		Token:  refreshToken,
+		UserID: uuid.NullUUID{UUID: user.ID, Valid: true},
 	}
 	refreshTokenRecord, err := cfg.db.CreateRefreshToken(r.Context(), refreshTokenParams)
+	fmt.Println(refreshTokenRecord.ExpiresAt)
 	if err != nil {
 		log.Printf("Saving refresh token to database failed: %s\n", err)
 		responsWithJSONError(w, 500, "Refresh token failed to generate")
@@ -325,6 +329,54 @@ func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
 		RefreshToken: refreshTokenRecord.Token,
 	}
 	responsWithJSON(w, 200, userResponse)
+}
+
+func (cfg *apiConfig) refreshToken(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Printf("Authorization header is missing")
+		responsWithJSONError(w, 401, "Valid JWT token is needed")
+		return
+	}
+	tokenEntry, err := cfg.db.GetRefreshTokenEntry(r.Context(), token)
+	if err != nil {
+		log.Printf("Token cannot be found: %s\n", err)
+		responsWithJSONError(w, 401, "Unauthorized")
+		return
+	}
+	if time.Now().After(tokenEntry.ExpiresAt) {
+		log.Printf("Refresh token has expired: %s\n", tokenEntry.ExpiresAt.Format(time.RFC3339))
+		responsWithJSONError(w, 401, "Unauthorized")
+		return
+	}
+	if tokenEntry.RevokedAt.Valid && time.Now().After(tokenEntry.RevokedAt.Time) {
+		log.Printf("Refresh token has been revoked: %s\n", tokenEntry.RevokedAt.Time.Format(time.RFC3339))
+		responsWithJSONError(w, 401, "Unauthorized")
+		return
+	}
+	jwt, _ := auth.MakeJWT(tokenEntry.UserID.UUID, cfg.jwtSecret, time.Hour)
+	log.Printf("New access token generated: %s\n", jwt)
+	tokenResponse := TokenResponse{
+		Token: jwt,
+	}
+	responsWithJSON(w, 200, tokenResponse)
+}
+
+func (cfg *apiConfig) revokeRefreshToken(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Printf("Authorization header is missing")
+		responsWithJSONError(w, 401, "Valid JWT token is needed")
+		return
+	}
+	updated, err := cfg.db.RevokeRefreshToken(r.Context(), token)
+	if err != nil {
+		log.Printf("Revoking token successfull: %s\n", err)
+		responsWithJSONError(w, 401, "Unauthorized")
+		return
+	}
+	log.Printf("Updated %d rows - token revoked\n", updated)
+	w.WriteHeader(204)
 }
 
 func main() {
@@ -347,6 +399,8 @@ func main() {
 	serverMux.HandleFunc("GET /api/chirps/{chirpID}", cfg.getChirp)
 	serverMux.HandleFunc("POST /api/users", cfg.createUser)
 	serverMux.HandleFunc("POST /api/login", cfg.login)
+	serverMux.HandleFunc("POST /api/refresh", cfg.refreshToken)
+	serverMux.HandleFunc("POST /api/revoke", cfg.revokeRefreshToken)
 	serverMux.HandleFunc("GET /admin/metrics", cfg.counter)
 	serverMux.HandleFunc("POST /admin/reset", cfg.reset)
 	server := http.Server{Handler: serverMux, Addr: ":8080"}

@@ -75,7 +75,7 @@ func GetBearerToken(headers http.Header) (string, error) {
 	return token, nil
 }
 
-func MakreRefreshToken() (string, error) {
+func MakereRefreshToken() (string, error) {
 	randString := make([]byte, 32)
 	_, err := rand.Read(randString)
 	if err != nil {

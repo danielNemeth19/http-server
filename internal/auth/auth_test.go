@@ -77,7 +77,7 @@ func TestGetBearerToken(t *testing.T) {
 }
 
 func TestMakeRefreshToken(t *testing.T) {
-	s, _ := MakreRefreshToken()
+	s, _ := MakereRefreshToken()
 	if len(s) != 64 {
 		t.Errorf("Len of refresh token should have been 64, got %d\n", len(s))
 	}
