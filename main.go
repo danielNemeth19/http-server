@@ -379,6 +379,53 @@ func (cfg *apiConfig) revokeRefreshToken(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(204)
 }
 
+func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Printf("Authorization header is missing")
+		responsWithJSONError(w, 401, "Valid JWT token is needed")
+		return
+	}
+	uuId, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		log.Printf("Token is invalid")
+		responsWithJSONError(w, 401, "Valid JWT token is needed")
+		return
+	}
+	data := CreateUserParams{}
+	decoder := json.NewDecoder(r.Body)
+	err = decoder.Decode(&data)
+	if err != nil {
+		log.Printf("Error decoding: %s\n", err)
+		responsWithJSONError(w, 500, "Params could not be parsed")
+		return
+	}
+	hashedPassword, err := auth.HashPassword(data.Password)
+	if err != nil {
+		log.Printf("Error hashing password: %s\n", err)
+		responsWithJSONError(w, 500, "Error hashing password")
+	}
+	params := database.UpdateUserParams{
+		Email: sql.NullString{Valid: true, String: data.Email},
+		HashedPassword: sql.NullString{Valid: true, String: hashedPassword},
+		ID: uuId,
+	}
+	user, err := cfg.db.UpdateUser(r.Context(), params)
+	if err != nil {
+		log.Printf("Updating user failed: %s\n", err)
+		responsWithJSONError(w, 500, "Unauthorized")
+		return
+	}
+	userResponse := User{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email.String,
+	}
+	log.Printf("User %s updated!\n", user.Email.String)
+	responsWithJSON(w, 200, userResponse)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -398,6 +445,7 @@ func main() {
 	serverMux.HandleFunc("GET /api/chirps", cfg.getChirps)
 	serverMux.HandleFunc("GET /api/chirps/{chirpID}", cfg.getChirp)
 	serverMux.HandleFunc("POST /api/users", cfg.createUser)
+	serverMux.HandleFunc("PUT /api/users", cfg.updateUser)
 	serverMux.HandleFunc("POST /api/login", cfg.login)
 	serverMux.HandleFunc("POST /api/refresh", cfg.refreshToken)
 	serverMux.HandleFunc("POST /api/revoke", cfg.revokeRefreshToken)

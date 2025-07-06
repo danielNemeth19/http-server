@@ -65,7 +65,7 @@ func (q *Queries) GetRefreshTokenEntry(ctx context.Context, token string) (Refre
 const revokeRefreshToken = `-- name: RevokeRefreshToken :execrows
 UPDATE refresh_tokens
 SET updated_at=NOW(),
- 	revoked_at=NOW()
+	revoked_at=NOW()
 WHERE token=$1
 `
 
