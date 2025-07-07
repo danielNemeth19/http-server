@@ -1,8 +1,8 @@
 package auth
 
 import (
-	"encoding/hex"
 	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"

@@ -216,13 +216,13 @@ func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
 	param := r.PathValue("chirpID")
-	uuidParam, err := uuid.Parse(param)
+	chirpID, err := uuid.Parse(param)
 	if err != nil {
 		log.Printf("Error parsing incoming param as UUID: %s\n", err)
 		responsWithJSONError(w, 400, "Bad value for UUID")
 		return
 	}
-	msg, err := cfg.db.GetChirp(r.Context(), uuidParam)
+	msg, err := cfg.db.GetChirp(r.Context(), chirpID)
 	if err == sql.ErrNoRows {
 		log.Printf("Not found error: %s\n", err)
 		responsWithJSONError(w, 404, "No record has been found")
@@ -240,6 +240,50 @@ func (cfg *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
 		UserID:    msg.UserID.UUID,
 	}
 	responsWithJSON(w, 200, chirp)
+}
+
+func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Printf("Authorization header is missing")
+		responsWithJSONError(w, 401, "Valid JWT token is needed")
+		return
+	}
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		log.Printf("Token is invalid")
+		responsWithJSONError(w, 401, "Valid JWT token is needed")
+		return
+	}
+	param := r.PathValue("chirpID")
+	chirpID, err := uuid.Parse(param)
+	if err != nil {
+		log.Printf("Error parsing incoming param as UUID: %s\n", err)
+		responsWithJSONError(w, 400, "Bad value for UUID")
+		return
+	}
+	chirp, err := cfg.db.GetChirp(r.Context(), chirpID)
+	if err == sql.ErrNoRows {
+		log.Printf("Not found error: %s\n", err)
+		responsWithJSONError(w, 404, "No record has been found")
+		return
+	} else if err != nil {
+		log.Printf("Error running database query: %s\n", err)
+		responsWithJSONError(w, 500, "Something went wrong")
+		return
+	}
+	if userID != chirp.UserID.UUID {
+		log.Printf("Chirp %s is not authored by %s\n", chirp.ID, chirp.UserID.UUID)
+		responsWithJSONError(w, 403, "Not Authorized to delete chirp")
+		return
+	}
+	_, err = cfg.db.DeleteChirp(r.Context(), chirpID)
+	if err != nil {
+		log.Printf("Error running database query of deleting chirp: %s\n", err)
+		responsWithJSONError(w, 500, "Something went wrong")
+		return
+	}
+	w.WriteHeader(204)
 }
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
@@ -444,6 +488,7 @@ func main() {
 	serverMux.HandleFunc("POST /api/chirps", cfg.addChirp)
 	serverMux.HandleFunc("GET /api/chirps", cfg.getChirps)
 	serverMux.HandleFunc("GET /api/chirps/{chirpID}", cfg.getChirp)
+	serverMux.HandleFunc("DELETE /api/chirps/{chirpID}", cfg.deleteChirp)
 	serverMux.HandleFunc("POST /api/users", cfg.createUser)
 	serverMux.HandleFunc("PUT /api/users", cfg.updateUser)
 	serverMux.HandleFunc("POST /api/login", cfg.login)
