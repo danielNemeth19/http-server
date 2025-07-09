@@ -470,6 +470,9 @@ func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 	responsWithJSON(w, 200, userResponse)
 }
 
+func (cfg *apiConfig) webhooks(w http.ResponseWriter, r *http.Request) {
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -496,6 +499,7 @@ func main() {
 	serverMux.HandleFunc("POST /api/revoke", cfg.revokeRefreshToken)
 	serverMux.HandleFunc("GET /admin/metrics", cfg.counter)
 	serverMux.HandleFunc("POST /admin/reset", cfg.reset)
+	serverMux.HandleFunc("POST /api/polka/webhooks", cfg.webhooks)
 	server := http.Server{Handler: serverMux, Addr: ":8080"}
 	server.ListenAndServe()
 }
