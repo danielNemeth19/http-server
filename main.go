@@ -30,10 +30,11 @@ type CreateUserParams struct {
 }
 
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
+	ID          uuid.UUID `json:"id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Email       string    `json:"email"`
+	IsChirpyRed bool      `json:"is_chirpy_red"`
 }
 
 type UserLoginParams struct {
@@ -46,6 +47,7 @@ type UserLogin struct {
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	Email        string    `json:"email"`
+	IsChirpyRed  bool      `json:"is_chirpy_red"`
 	Token        string    `json:"token"`
 	RefreshToken string    `json:"refresh_token"`
 }
@@ -64,6 +66,15 @@ type Chirp struct {
 
 type TokenResponse struct {
 	Token string `json:"token"`
+}
+
+type UserID struct {
+	ID uuid.UUID `json:"user_id"`
+}
+
+type WebhookRequestParams struct {
+	Event string `json:"event"`
+	Data  UserID `json:"data"`
 }
 
 func (c *ChirpRequestParams) cleanedWord(w string) string {
@@ -311,10 +322,11 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userResponse := User{
-		ID:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email.String,
+		ID:          user.ID,
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
+		Email:       user.Email.String,
+		IsChirpyRed: user.IsChirpyRed.Bool,
 	}
 	log.Printf("User created: %s\n", userResponse.Email)
 	responsWithJSON(w, 201, userResponse)
@@ -369,6 +381,7 @@ func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    user.CreatedAt,
 		UpdatedAt:    user.UpdatedAt,
 		Email:        user.Email.String,
+		IsChirpyRed:  user.IsChirpyRed.Bool,
 		Token:        jwt,
 		RefreshToken: refreshTokenRecord.Token,
 	}
@@ -450,27 +463,56 @@ func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 		responsWithJSONError(w, 500, "Error hashing password")
 	}
 	params := database.UpdateUserParams{
-		Email: sql.NullString{Valid: true, String: data.Email},
+		Email:          sql.NullString{Valid: true, String: data.Email},
 		HashedPassword: sql.NullString{Valid: true, String: hashedPassword},
-		ID: uuId,
+		ID:             uuId,
 	}
 	user, err := cfg.db.UpdateUser(r.Context(), params)
 	if err != nil {
 		log.Printf("Updating user failed: %s\n", err)
-		responsWithJSONError(w, 500, "Unauthorized")
+		responsWithJSONError(w, 500, "Error happened")
 		return
 	}
 	userResponse := User{
-		ID:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email.String,
+		ID:          user.ID,
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
+		Email:       user.Email.String,
+		IsChirpyRed: user.IsChirpyRed.Bool,
 	}
 	log.Printf("User %s updated!\n", user.Email.String)
 	responsWithJSON(w, 200, userResponse)
 }
 
 func (cfg *apiConfig) webhooks(w http.ResponseWriter, r *http.Request) {
+	data := WebhookRequestParams{}
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&data)
+	if err != nil {
+		log.Printf("Error decoding: %s\n", err)
+		responsWithJSONError(w, 500, "Params could not be parsed")
+		return
+	}
+	if data.Event != "user.upgraded" {
+		w.WriteHeader(204)
+		return
+	}
+	params := database.UpdateUserChirpyParams{
+		IsChirpyRed: sql.NullBool{Valid: true, Bool: true},
+		ID:          data.Data.ID,
+	}
+	user, err := cfg.db.UpdateUserChirpy(r.Context(), params)
+	if err == sql.ErrNoRows {
+		log.Printf("Not found error: %s\n", err)
+		responsWithJSONError(w, 404, "User has not been found")
+		return
+	} else if err != nil {
+		log.Printf("Error running database query: %s\n", err)
+		responsWithJSONError(w, 500, "Something went wrong")
+		return
+	}
+	log.Printf("User %s has been upgraded\n", user.Email.String)
+	w.WriteHeader(204)
 }
 
 func main() {
