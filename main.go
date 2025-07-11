@@ -104,6 +104,7 @@ type apiConfig struct {
 	db             *database.Queries
 	env            string
 	jwtSecret      string
+	apiKey         string
 }
 
 func (cfg *apiConfig) middleWareMetrics(next http.Handler) http.Handler {
@@ -485,9 +486,20 @@ func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) webhooks(w http.ResponseWriter, r *http.Request) {
+	apiKey, err := auth.GetApiKey(r.Header)
+	if err != nil {
+		log.Printf("ApiKey not found in request header: %s\n", err)
+		responsWithJSONError(w, 401, "ApiKey required")
+		return
+	}
+	if apiKey != cfg.apiKey {
+		log.Printf("ApiKey is invalid got %s expected %s\n", apiKey, cfg.apiKey)
+		responsWithJSONError(w, 401, "ApiKey invalid")
+		return
+	}
 	data := WebhookRequestParams{}
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&data)
+	err = decoder.Decode(&data)
 	if err != nil {
 		log.Printf("Error decoding: %s\n", err)
 		responsWithJSONError(w, 500, "Params could not be parsed")
@@ -520,13 +532,14 @@ func main() {
 	dbURL := os.Getenv("DB_URL")
 	env := os.Getenv("PLATFORM")
 	secret := os.Getenv("SECRET")
+	apiKey := os.Getenv("POLKA_KEY")
 	db, err := sql.Open("postgres", dbURL)
 	dbQueries := database.New(db)
 
 	if err != nil {
 		log.Printf("Error connecting: %s\n", err)
 	}
-	cfg := apiConfig{db: dbQueries, env: env, jwtSecret: secret}
+	cfg := apiConfig{db: dbQueries, env: env, jwtSecret: secret, apiKey: apiKey}
 	serverMux := http.NewServeMux()
 	serverMux.Handle("/app/", http.StripPrefix("/app/", cfg.middleWareMetrics(http.FileServer(http.Dir(".")))))
 	serverMux.HandleFunc("GET /api/healthz", healthCheck)

@@ -82,3 +82,33 @@ func TestMakeRefreshToken(t *testing.T) {
 		t.Errorf("Len of refresh token should have been 64, got %d\n", len(s))
 	}
 }
+
+func TestGetApiKey(t *testing.T) {
+	header := http.Header{
+		"Authorization": []string{"ApiKey test-api-key"},
+	}
+	apiKey, _ := GetApiKey(header)
+	if apiKey != "test-api-key" {
+		t.Errorf("ApiKey should be test-api-key, got %s\n", apiKey)
+	}
+}
+
+func TestGetApiKeyFailsIncorrectHeader(t *testing.T) {
+	header := http.Header{
+		"Irrelevant": []string{"barmi"},
+	}
+	_, err := GetApiKey(header)
+	if err == nil {
+		t.Errorf("Error should have been raised as Authorization header missing: %s\n", err)
+	}
+}
+
+func TestGetApiKeyInvalidBearerToken(t *testing.T) {
+	header := http.Header{
+		"Authorization": []string{"invalid"},
+	}
+	_, err := GetBearerToken(header)
+	if err == nil {
+		t.Errorf("Error should have been raised as string not a bearer token: %s\n", err)
+	}
+}
