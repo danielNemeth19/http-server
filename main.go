@@ -205,11 +205,32 @@ func (cfg *apiConfig) addChirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
-	chirpsDB, err := cfg.db.GetChirps(r.Context())
-	if err != nil {
-		log.Printf("Error running database query: %s\n", err)
-		responsWithJSONError(w, 500, "Something went wrong")
-		return
+	var chirpsDB []database.Chirp
+	var err error
+	param := r.URL.Query().Get("author_id")
+
+	if param != "" {
+		authorID, err := uuid.Parse(param)
+		if err != nil {
+			log.Printf("Error parsing incoming param as UUID: %s\n", err)
+			responsWithJSONError(w, 400, "Bad value for UUID")
+			return
+		}
+		chirpsDB, err = cfg.db.GetChirpOfAuthor(r.Context(), uuid.NullUUID{UUID: authorID, Valid: true})
+		if err != nil {
+			log.Printf("Error running database query: %s\n", err)
+			responsWithJSONError(w, 500, "Something went wrong")
+			return
+		}
+
+	} else {
+		chirpsDB, err = cfg.db.GetChirps(r.Context())
+		if err != nil {
+			log.Printf("Error running database query: %s\n", err)
+			responsWithJSONError(w, 500, "Something went wrong")
+			return
+		}
+
 	}
 	var chirps []Chirp
 	for _, msg := range chirpsDB {
