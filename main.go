@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -207,10 +208,10 @@ func (cfg *apiConfig) addChirp(w http.ResponseWriter, r *http.Request) {
 func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
 	var chirpsDB []database.Chirp
 	var err error
-	param := r.URL.Query().Get("author_id")
-
-	if param != "" {
-		authorID, err := uuid.Parse(param)
+	authorParam := r.URL.Query().Get("author_id")
+	sortParam := r.URL.Query().Get("sort")
+	if authorParam != "" {
+		authorID, err := uuid.Parse(authorParam)
 		if err != nil {
 			log.Printf("Error parsing incoming param as UUID: %s\n", err)
 			responsWithJSONError(w, 400, "Bad value for UUID")
@@ -232,6 +233,14 @@ func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
 		}
 
 	}
+	sort.Slice(chirpsDB, func(i, j int) bool {
+		switch sortParam {
+		case "desc":
+			return chirpsDB[i].CreatedAt.After(chirpsDB[j].CreatedAt)
+		default:
+			return chirpsDB[i].CreatedAt.Before(chirpsDB[j].CreatedAt)
+		}
+	})
 	var chirps []Chirp
 	for _, msg := range chirpsDB {
 		chirp := Chirp{
